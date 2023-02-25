@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json;
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
@@ -12,11 +13,27 @@ struct Data {
 
 struct Result {
     value: String,
-    score: u64,
+    score: u32,
 }
 
 struct Handler {
     data: Data,
+}
+
+fn calculate_score(input: &[&str], words: &Vec<String>) -> u32 {
+    let mut score: u32 = 0;
+    let i = 0usize;
+
+    for s in input.into_iter() {
+        for i in i..words.len() {
+            if words[i] == *s {
+                score += 1;
+                break;
+            }
+        }
+    }
+
+    return score;
 }
 
 #[async_trait]
@@ -27,23 +44,23 @@ impl EventHandler for Handler {
         let rest = &split[1..];
 
         if command == "lph" {
+        } else if command == "lph-stats" {
+            if let Err(why) = msg
+                .channel_id
+                .say(&ctx.http, format!("Messages: {}", self.data.data.len()))
+                .await
+            {
+                println!("Error sending message: {:?}", why);
+            }
+        } else if command == "lph-search" {
+            let now = std::time::Instant::now();
             let mut collected = Vec::<Result>::new();
 
-            for d in &self.data.data {
-                let mut score = 0;
-                let i = 0;
-
-                for s in rest.into_iter() {
-                    for i in i..d.len() {
-                        if d[i] == *s {
-                            score += 1;
-                            break;
-                        }
-                    }
-                }
+            for words in &self.data.data {
+                let score = calculate_score(rest, words);
 
                 collected.push(Result {
-                    value: d.join(" "),
+                    value: words.join(" "),
                     score,
                 });
             }
@@ -51,12 +68,16 @@ impl EventHandler for Handler {
             let mut results = Vec::from_iter(collected.iter().filter(|x| x.score > 0));
             results.sort_by(|a, b| b.score.cmp(&a.score));
 
+            let reply = format!(
+                "{} results ({:.2} seconds)\n\n{}",
+                results.len(),
+                now.elapsed().as_secs_f32(),
+                Vec::from_iter(results.iter().map(|x| x.value.as_str()))[0..10].join("\n")
+            );
+
             if let Err(why) = msg
                 .channel_id
-                .say(
-                    &ctx.http,
-                    Vec::from_iter(results.iter().map(|x| x.value.as_str()))[0..5].join("\n"),
-                )
+                .say(&ctx.http, &reply.get(0..2000).unwrap_or(&reply))
                 .await
             {
                 println!("Error sending message: {:?}", why);
