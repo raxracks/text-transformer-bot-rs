@@ -1,12 +1,22 @@
-use std::fs;
+use serde::{Deserialize, Serialize};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
-use serde_json::{Value, json};
+use std::fs;
+
+#[derive(Serialize, Deserialize)]
+struct Data {
+    data: Vec<Vec<String>>,
+}
+
+struct Result {
+    value: String,
+    score: u64,
+}
 
 struct Handler {
-    data: Value
+    data: Data,
 }
 
 #[async_trait]
@@ -17,33 +27,38 @@ impl EventHandler for Handler {
         let rest = &split[1..];
 
         if command == "lph" {
-            let mut collected = Vec::<Value>::new();
+            let mut collected = Vec::<Result>::new();
 
-            for d in self.data["data"].as_array().unwrap() {
+            for d in &self.data.data {
                 let mut score = 0;
-                let i = 0u64;
+                let i = 0;
 
                 for s in rest.into_iter() {
-                    let words = d.as_array().unwrap();
-
-                    for i in i..(words.len() as u64) {
-                        if words[i as usize].as_str().unwrap() == *s {
+                    for i in i..d.len() {
+                        if d[i] == *s {
                             score += 1;
                             break;
                         }
                     }
                 }
 
-                collected.push(json!({
-                    "value": Vec::from_iter(d.as_array().unwrap().iter().map(|x| x.as_str().unwrap())).join(" "),
-                    "score": score
-                }));
+                collected.push(Result {
+                    value: d.join(" "),
+                    score,
+                });
             }
 
-            let mut results = Vec::from_iter(collected.iter().filter(|x| x["score"].as_u64().unwrap() > 0));
-            results.sort_by(|a, b| b["score"].as_u64().unwrap().cmp(&a["score"].as_u64().unwrap()));
+            let mut results = Vec::from_iter(collected.iter().filter(|x| x.score > 0));
+            results.sort_by(|a, b| b.score.cmp(&a.score));
 
-            if let Err(why) = msg.channel_id.say(&ctx.http, Vec::from_iter(results.iter().map(|x| x["value"].as_str().unwrap()))[0..5].join("\n")).await {
+            if let Err(why) = msg
+                .channel_id
+                .say(
+                    &ctx.http,
+                    Vec::from_iter(results.iter().map(|x| x.value.as_str()))[0..5].join("\n"),
+                )
+                .await
+            {
                 println!("Error sending message: {:?}", why);
             }
         }
@@ -61,8 +76,13 @@ async fn main() {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT;
 
-    let mut client =
-        Client::builder(&token, intents).event_handler(Handler { data: serde_json::from_str(fs::read_to_string("./data.json").unwrap().as_str()).unwrap() }).await.expect("Err creating client");
+    let mut client = Client::builder(&token, intents)
+        .event_handler(Handler {
+            data: serde_json::from_str(fs::read_to_string("./data.json").unwrap().as_str())
+                .unwrap(),
+        })
+        .await
+        .expect("Err creating client");
 
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
